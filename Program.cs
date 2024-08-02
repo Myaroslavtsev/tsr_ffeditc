@@ -22,10 +22,12 @@ namespace tsr_ffeditc
             {
                 Console.WriteLine("Incorrect arguments count\r\n");
                 WriteHelp();
+
+                return (null, null);
             }
             else
             {
-                
+                return (args[0], null);
             }
         }
 
