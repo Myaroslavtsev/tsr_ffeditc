@@ -19,7 +19,7 @@ namespace tsr_ffeditc
     /// </summary>
     public abstract class SBR : IDisposable
     {
-        public TokenID ID;
+        //public TokenID ID;
         public string Label;  // First data item may be a label ( usually a 0 byte )
 
         public static SBR Open(string filename)
@@ -94,59 +94,16 @@ namespace tsr_ffeditc
             }
         }
 
-        public abstract SBR ReadSubBlock();
+        //public abstract SBR ReadSubBlock();
 
         /// <summary>
         /// Skip to the end of this block
         /// </summary>
-        public abstract void Skip();
-        public abstract void VerifyEndOfBlock();
-        public abstract uint ReadFlags();
-        public abstract int ReadInt();
-        public abstract uint ReadUInt();
-        public abstract float ReadFloat();
+        //public abstract void Skip();
         public abstract string ReadString();
-        public abstract bool EndOfBlock();
-
-        public Vector3 ReadVector3()
-        {
-            Vector3 vector3 = new Vector3();
-            vector3.X = ReadFloat();
-            vector3.Y = ReadFloat();
-            vector3.Z = ReadFloat();
-            return vector3;
-        }
-
-        public void VerifyID(TokenID desiredID)
-        {
-            if (ID != desiredID)
-                TraceInformation("Expected block " + desiredID + "; got " + ID);
-        }
-
-        /// <summary>
-        /// Verify that this is a comment block.
-        /// </summary>
-        /// <param name="block"></param>
-        public void ExpectComment()
-        {
-            if (ID == TokenID.comment)
-            {
-                Skip();
-            }
-            else
-            {
-                TraceInformation("Expected block comment; got " + ID);
-                Skip();
-            }
-        }
-
-        public abstract void TraceInformation(string message);
-        public abstract void TraceWarning(string message);
-        public abstract void ThrowException(string message);
 
         public void Dispose()
         {
-            VerifyEndOfBlock();
         }
     }
 
@@ -155,56 +112,9 @@ namespace tsr_ffeditc
     /// </summary>
     public class UnicodeFileReader : UnicodeBlockReader
     {
-        bool isClosed;
-
         public UnicodeFileReader(Stream inputStream, string filename, Encoding encoding)
         {
-            f = new STFReader(inputStream, filename, encoding, false);
-        }
-
-        /// <summary>
-        /// Skip to the end of this block
-        /// </summary>
-        /// <returns></returns>
-        public override void Skip()
-        {
-            f.Dispose();
-            isClosed = true;
-        }
-
-        public override void VerifyEndOfBlock()
-        {
-            if (isClosed) return;
-
-            string s = f.ReadItem();
-            string extraData = s;
-            if (s != "")
-            {
-                // we have extra data at the end of the file
-                while (s != "")
-                {
-                    if (s != ")")  // we'll ignore extra )'s since the files are full of misformed brackets
-                    {
-                        TraceWarning("Expected end of file; got '" + s + "'");
-                        f.Dispose();
-                        isClosed = true;
-                        return;
-                    }
-                    s = f.ReadItem();
-                }
-            }
-            f.Dispose();
-            isClosed = true;
-        }
-
-        /// <summary>
-        /// Note, it doesn't consume the end of block marker, you must still
-        /// call VerifiyEndOfBlock to consume it
-        /// </summary>
-        /// <returns></returns>
-        public override bool EndOfBlock()
-        {
-            return isClosed || atEndOfBlock || f.PeekPastWhitespace() == -1;
+            f = new StreamReader(inputStream, encoding); //new STFReader(inputStream, filename, encoding, false);
         }
     }
 
@@ -213,155 +123,9 @@ namespace tsr_ffeditc
     /// </summary>
     public class UnicodeBlockReader : SBR
     {
-        protected STFReader f;
-        protected bool atEndOfBlock;
-
-        public override SBR ReadSubBlock()
-        {
-            UnicodeBlockReader block = new UnicodeBlockReader();
-            block.f = f;
-
-            string token = f.ReadItem();
-
-            if (token == "(")
-            {
-                // ie 310.eng Line 349  (#_fire temp, fire mass, water mass, boil ...
-                block.ID = TokenID.comment;
-                return block;
-            }
-
-            // parse token
-            block.ID = GetTokenID(token);
-
-            if (token == ")")
-            {
-                TraceWarning("Ignored extra close bracket");
-                return block;
-            }
-
-            // now look for optional label, ie matrix MAIN ( ....
-            token = f.ReadItem();
-
-            if (token != "(")
-            {
-                block.Label = token;
-                f.VerifyStartOfBlock();
-            }
-
-            return block;
-        }
-
-        /// <summary>
-        /// Used to convert token string to their equivalent enum TokenID
-        /// </summary>
-        private static Dictionary<string, TokenID> TokenTable;
-
-        private static void InitTokenTable()
-        {
-            TokenID[] tokenIDValues = (TokenID[])Enum.GetValues(typeof(TokenID));
-            TokenTable = new Dictionary<string, TokenID>(tokenIDValues.GetLength(0));
-            foreach (TokenID tokenID in tokenIDValues)
-            {
-                TokenTable.Add(tokenID.ToString().ToLower(), tokenID);
-            }
-        }
-
-        private TokenID GetTokenID(string token)
-        {
-            if (TokenTable == null) InitTokenTable();
-
-            TokenID tokenID = 0;
-            if (TokenTable.TryGetValue(token.ToLower(), out tokenID))
-                return tokenID;
-            else if (string.Compare(token, "SKIP", true) == 0)
-                return TokenID.comment;
-            else if (string.Compare(token, "COMMENT", true) == 0)
-                return TokenID.comment;
-            else if (token.StartsWith("#"))
-                return TokenID.comment;
-            else
-            {
-                TraceWarning("Skipped unknown token " + token);
-                return TokenID.comment;
-            }
-        }
-
-        /// <summary>
-        /// Skip to the end of this block
-        /// </summary>
-        /// <returns></returns>
-        public override void Skip()
-        {
-            if (atEndOfBlock) return;  // already there
-
-            // We are inside a pair of brackets, skip the entire hierarchy to past the end bracket
-            int depth = 1;
-            while (depth > 0)
-            {
-                string token = f.ReadItem();
-                if (token == "")
-                {
-                    TraceWarning("Unexpected end of file");
-                    atEndOfBlock = true;
-                    return;
-                }
-                if (token == "(")
-                    ++depth;
-                if (token == ")")
-                    --depth;
-            }
-            atEndOfBlock = true;
-        }
-
-        /// <summary>
-        /// Note, it doesn't consume the end of block marker, you must still
-        /// call VerifiyEndOfBlock to consume it
-        /// </summary>
-        /// <returns></returns>
-        public override bool EndOfBlock()
-        {
-            return atEndOfBlock || f.PeekPastWhitespace() == ')' || f.EOF();
-        }
-
-        public override void VerifyEndOfBlock()
-        {
-            if (!atEndOfBlock)
-            {
-                string s = f.ReadItem();
-                if (s.StartsWith("#") || 0 == string.Compare(s, "comment", true))
-                {
-                    // allow comments at end of block ie
-                    // MaxReleaseRate( 1.4074  #For train position 31-45  use (1.86 - ( 0.0146 * 31 ))	)
-                    Skip();
-                    return;
-                }
-                if (s != ")")
-                    TraceWarning("Expected end of block; got '" + s + "'");
-
-                atEndOfBlock = true;
-            }
-        }
-
-        public override uint ReadFlags() { return f.ReadHex(null); }
-        public override int ReadInt() { return f.ReadInt(null); }
-        public override uint ReadUInt() { return f.ReadUInt(null); }
-        public override float ReadFloat() { return f.ReadFloat(STFReader.UNITS.None, null); }
-        public override string ReadString() { return f.ReadItem(); }
-
-        public override void TraceInformation(string message)
-        {
-            STFException.TraceInformation(f, message);
-        }
-
-        public override void TraceWarning(string message)
-        {
-            STFException.TraceWarning(f, message);
-        }
-
-        public override void ThrowException(string message)
-        {
-            throw new STFException(f, message);
-        }
+        protected StreamReader f;
+        
+        public override string ReadString() { return f.ReadLine(); }
     }
 
     /// <summary>
@@ -383,24 +147,6 @@ namespace tsr_ffeditc
             InputStream = new BinaryReader(inputStream);
             TokenOffset = tokenOffset;
         }
-
-        public override void Skip()
-        {
-            while (!EndOfBlock())
-                InputStream.ReadByte();
-        }
-
-        public override bool EndOfBlock()
-        {
-            return InputStream.PeekChar() == -1;
-        }
-
-        public override void VerifyEndOfBlock()
-        {
-            if (!EndOfBlock())
-                TraceWarning("Expected end of file; got more data");
-            InputStream.Close();
-        }
     }
 
     /// <summary>
@@ -414,65 +160,6 @@ namespace tsr_ffeditc
         public uint Flags;
         protected int TokenOffset;     // the binaryTokens are offset by this amount, ie for binary world files 
 
-        public override SBR ReadSubBlock()
-        {
-            BinaryBlockReader block = new BinaryBlockReader();
-
-            block.Filename = Filename;
-            block.InputStream = InputStream;
-            block.TokenOffset = TokenOffset;
-
-            int MSTSToken = InputStream.ReadUInt16();
-            block.ID = (TokenID)(MSTSToken + TokenOffset);
-            block.Flags = InputStream.ReadUInt16();
-            block.RemainingBytes = InputStream.ReadUInt32(); // record length
-
-            uint blockSize = block.RemainingBytes + 8; //for the header
-            RemainingBytes -= blockSize;
-
-            int labelLength = InputStream.ReadByte();
-            block.RemainingBytes -= 1;
-            if (labelLength > 0)
-            {
-                byte[] buffer = InputStream.ReadBytes(labelLength * 2);
-                block.Label = System.Text.Encoding.Unicode.GetString(buffer, 0, labelLength * 2);
-                block.RemainingBytes -= (uint)labelLength * 2;
-            }
-            return block;
-        }
-
-        public override void Skip()
-        {
-            if (RemainingBytes > 0)
-            {
-                if (RemainingBytes > Int32.MaxValue)
-                {
-                    TraceWarning("Remaining Bytes overflow");
-                    RemainingBytes = 1000;
-                }
-                InputStream.ReadBytes((int)RemainingBytes);
-
-                RemainingBytes = 0;
-            }
-        }
-        public override bool EndOfBlock()
-        {
-            return RemainingBytes == 0;
-        }
-
-        public override void VerifyEndOfBlock()
-        {
-            if (!EndOfBlock())
-            {
-                TraceWarning("Expected end of block " + ID + "; got more data");
-                Skip();
-            }
-        }
-
-        public override uint ReadFlags() { RemainingBytes -= 4; return InputStream.ReadUInt32(); }
-        public override int ReadInt() { RemainingBytes -= 4; return InputStream.ReadInt32(); }
-        public override uint ReadUInt() { RemainingBytes -= 4; return InputStream.ReadUInt32(); }
-        public override float ReadFloat() { RemainingBytes -= 4; return InputStream.ReadSingle(); }
         public override string ReadString()
         {
             ushort count = InputStream.ReadUInt16();
@@ -487,39 +174,6 @@ namespace tsr_ffeditc
             {
                 return "";
             }
-        }
-
-        public override void TraceInformation(string message)
-        {
-            SBRException.TraceInformation(this, message);
-        }
-
-        public override void TraceWarning(string message)
-        {
-            SBRException.TraceWarning(this, message);
-        }
-
-        public override void ThrowException(string message)
-        {
-            throw new SBRException(this, message);
-        }
-    }
-
-    public class SBRException : Exception
-    {
-        public static void TraceWarning(BinaryBlockReader sbr, string message)
-        {
-            Trace.TraceWarning("{2} in {0}:byte {1}", sbr.Filename, sbr.InputStream.BaseStream.Position, message);
-        }
-
-        public static void TraceInformation(BinaryBlockReader sbr, string message)
-        {
-            Trace.TraceInformation("{2} in {0}:byte {1}", sbr.Filename, sbr.InputStream.BaseStream.Position, message);
-        }
-
-        public SBRException(BinaryBlockReader sbr, string message)
-            : base(String.Format("{2} in {0}:byte {1}\n", sbr.Filename, sbr.InputStream.BaseStream.Position, message))
-        {
         }
     }
 }
